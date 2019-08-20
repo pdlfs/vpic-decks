@@ -204,7 +204,7 @@
 //
 
 #define tag_tracer(p, tracer, tag) BEGIN_PRIMITIVE{                           \
-    float q = * reinterpret_cast<float *>( &tag ) ;                           \
+    float q = 0 /* XXX WAS: * reinterpret_cast<float *>( &tag ) */;           \
     double xmin = grid->x0;                                                   \
     double xmax = grid->x0+grid->nx*grid->dx;                                 \
     double ymin = grid->y0;                                                   \
@@ -216,7 +216,7 @@
          && y >= ymin && y <= ymax                                            \
          && z >= zmin && z <= zmax ) {                                        \
       inject_particle_raw(tracer, p->dx, p->dy, p->dz, p->i,                  \
-                          p->ux, p->uy, p->uz, q);                            \
+                          p->ux, p->uy, p->uz, q, tag /*XXX*/);               \
     } /* if */                                                                \
 } END_PRIMITIVE
 
@@ -617,6 +617,93 @@ template <typename T> int is_negative(T val) {
       s = s->next;                                                            \
     }                                                                         \
     delete [] pout;                                                           \
+} END_PRIMITIVE
+
+//--------------------------------------------------------------
+// dump tracer by particle trajectory (XXX deltafs version)
+// XXX: minimize changes (let optmizer remove unused stuff)
+// XXX: disable user defined fields for now
+#define dump_traj_dfs(fbase) BEGIN_PRIMITIVE{                                 \
+    char dname[256], fname[256] ;                                             \
+    char sp_name[16], tracer_name[16];                                        \
+    char *pch;                                                                \
+    species_t *s = global->tracers_list ;                                     \
+    float ex, ey, ez, bx, by, bz;                                             \
+    float dx0, dy0, dz0;                                                      \
+    float ux, uy, uz, q;                                                      \
+    int ii, n, nvar, index, tag;                                              \
+    float dx, dy, dz;                                                         \
+    float vx, vy, vz;                                                         \
+    float w0, w1, w2, w3, w4, w5, w6, w7;                                     \
+    int ix, iy, iz;                                                           \
+    const int nx2 = grid->nx + 2;                                             \
+    const int nx2ny2 = (grid->ny+2) * nx2;                                    \
+    /* const *//*XXX*/ particle_t     * ALIGNED(32) p;                        \
+    /* const *//*XXX*/ particle_t     * ALIGNED(32) p0;                       \
+    const interpolator_t * ALIGNED(16) f0=interpolator_array->i;              \
+    const interpolator_t * ALIGNED(16) f;                                     \
+    const grid_t  * g = grid;                                                 \
+    const hydro_t * ALIGNED(32) hy;                                           \
+    const float r8V = 0.125;                                                  \
+    /* float *pout; */ /* XXX: now on stack */                                \
+    FileIO fh;                                                                \
+    FileIOStatus status;                                                      \
+    DIR *d; /* XXX */                                                         \
+                                                                              \
+    sprintf(dname, "%s", fbase );                                             \
+    if (step() == 0)           /* XXX */                                      \
+      dump_mkdir(dname);                                                      \
+    nvar = 10; /* XXX: was TRACER_NUM_FIELDS_BASE+TRACER_NUM_ADDED_FIELDS */  \
+    index = 0;                                                                \
+    float pout[nvar];  /* XXX: was a new/malloc, now on stack */              \
+    while( s ){                                                               \
+      n = s->np;                                                              \
+      if ( n > 0 ){                                                           \
+        p0 = s->p;                                                            \
+        for ( p=p0; n; n--, p++ ){                                            \
+          dx0 = p->dx;                                                        \
+          dy0 = p->dy;                                                        \
+          dz0 = p->dz;                                                        \
+          ii = p->i;                                                          \
+          ux = p->ux;                                                         \
+          uy = p->uy;                                                         \
+          uz = p->uz;                                                         \
+          q = p->w;                                                           \
+          /* XXX:start, used to load tag from reinterpret_cast of &q */       \
+          if (p->tag == 0) {                                                  \
+            int j = p - p0;                                                   \
+            p->tag = (((int64_t) rank()) << 46) |                             \
+                      ((j+1) & 0x3ffffffffff);                                \
+          }                                                                   \
+          int64_t tag = p->tag;                                               \
+          /* XXX:end tag load */                                              \
+          f = f0 + ii;                                                        \
+          if (tag != 0) {                                                     \
+            /* CALC_TRACER_USER_DEFINED_DATA; */ /* XXX */                    \
+            sprintf(fname, "%s/%s.%" PRId64, dname , s->name, tag); /* XXX */ \
+            status = fh.open(fname,io_append);                                \
+            if ( status == fail ) ERROR(("Could not open file %s", fname));   \
+            pout[index + 0] = step()*grid->dt ;                               \
+            /* XXX:start new format */                                        \
+            pout[index + 1] = (float) p->dx ;                                 \
+            pout[index + 2] = (float) p->dy ;                                 \
+            pout[index + 3] = (float) p->dz ;                                 \
+            pout[index + 4] = (float) p->i;                                   \
+            pout[index + 5] = ux;                                             \
+            pout[index + 6] = uy;                                             \
+            pout[index + 7] = uz;                                             \
+            memcpy(pout+8, &tag, sizeof(tag));                                \
+            /* XXX:end new format */                                          \
+            /* TRACER_USER_DEFINED_DATA; */  /* XXX */                        \
+            fh.write(pout,nvar);                                              \
+            fh.close();                                                       \
+          }                                                                   \
+        }                                                                     \
+      }                                                                       \
+      s = s->next;                                                            \
+    }                                                                         \
+    if (d) closedir(d);    /* XXX */                                          \
+    /* delete [] pout; */  /* XXX: now on stack */                            \
 } END_PRIMITIVE
 
 //--------------------------------------------------------------
