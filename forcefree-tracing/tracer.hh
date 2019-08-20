@@ -409,7 +409,7 @@ template <typename T> int is_negative(T val) {
     float *pout;                                                              \
     FileIO       fh;                                                          \
     FileIOStatus status;                                                      \
-    sprintf(dname, "%s/T.%d", fbase, step() );                                \
+    sprintf(dname, "%s/T.%" PRId64, fbase, step() );                          \
     dump_mkdir(dname);                                                        \
                                                                               \
     nvar = TRACER_NUM_FIELDS_BASE + TRACER_NUM_ADDED_FIELDS;                  \
@@ -788,7 +788,7 @@ static int    *ntraj_point_tracer;
     FileIO       fh;                                                          \
     FileIOStatus status;                                                      \
     species_t *s = global->tracers_list ;                                     \
-    sprintf(dname, "%s/T.%d", fbase, step() );                                \
+    sprintf(dname, "%s/T.%" PRId64, fbase, step() );                          \
     dump_mkdir(dname);                                                        \
     int isp = 0;                                                              \
     while ( s ) {                                                             \

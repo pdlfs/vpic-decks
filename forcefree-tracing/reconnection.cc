@@ -1,3 +1,5 @@
+#include <inttypes.h>
+
 ///////////////////////////////////////////////////////////////////////////////
 //
 //  Reconnection Problem --> single Force-Free Current Sheet with conductive BC
@@ -973,11 +975,11 @@ begin_initialization {
 
   global->ede.sp_id = electron->id;
   global->ede.vth = sqrt(2.0)*vthe;
-  sprintf(global->ede.fname, global->hedParams.baseFileName);
+  sprintf(global->ede.fname, "%s", global->hedParams.baseFileName);
 
   global->edi.sp_id = ion->id;
   global->edi.vth = sqrt(2.0)*vthi;
-  sprintf(global->edi.fname, global->hHdParams.baseFileName);
+  sprintf(global->edi.fname, "%s", global->hHdParams.baseFileName);
 
   global->emax_band  = emax_band;
   global->emin_band  = emin_band;
@@ -1447,7 +1449,7 @@ begin_diagnostics {
   char subdir[36];
   if ( should_dump(eparticle) && step() !=0 &&
        step() > 0*(global->fields_interval)  ) {
-    sprintf(subdir,"particle/T.%d",step());
+    sprintf(subdir,"particle/T.%" PRId64, step());
     dump_mkdir(subdir);
     /* sprintf(subdir,"particle/T.%d/eparticle",step()); */
     /* dump_particles("electron",subdir); */
@@ -1459,7 +1461,7 @@ begin_diagnostics {
 
   if ( should_dump(Hparticle) && step() !=0 &&
        step() > 0*(global->fields_interval)  ) {
-    sprintf(subdir,"particle/T.%d",step());
+    sprintf(subdir,"particle/T.%" PRId64, step());
     dump_mkdir(subdir);
     /* sprintf(subdir,"particle/T.%d/hparticle",step()); */
     /* dump_particles("ion",subdir); */
