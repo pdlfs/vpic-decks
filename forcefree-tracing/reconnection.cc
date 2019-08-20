@@ -1,4 +1,21 @@
-#include <inttypes.h>
+#include <inttypes.h>   /* XXX: for printf PRI* macros */
+#include <sys/types.h>  /* XXX: for opendir() */
+#include <dirent.h>     /* XXX: for opendir() */
+
+#include "config.h"     /* XXX: read config from our scripts */
+
+/*
+ * Brief primer on tuning your VPIC run:
+ *  - Taui: number of timesteps for the run. wpe_wce = 0.36 (if you didn't
+ *    touch anything), so the default 2000/wpe_wce is 5555 time steps
+ *  - Quota: max number of hours before experiment is stopped
+ *  - Topology_*: Number of domains (=nodes!) in simulation
+ *  - nx, ny, nz: Number of particles per dimension
+ *    Total number of particles = 2 * (nppc * nx * ny * nz)
+ *  - particle_select: Particle sampling rate. We would like this to be 1,
+ *    which will output (nppc * nx * ny * nz) / particle_select file pairs
+ *  - tracer_int: Particle dump rate (in time steps)
+ */
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -111,7 +128,7 @@ begin_globals {
   int particle_tracing_start;
   int dump_traj_directly;
   species_t *tracers_list;
-  int tag;
+  int64_t tag;  /* XXX: was plain int */
   double mi_me;
   int Ntracer;
 
@@ -144,7 +161,8 @@ begin_initialization {
 
   // particle tracking
   int particle_tracing = 1; // 0: notracing, 1: forward tracing 2: tracing from particle files
-  int particle_select = 5000; // track one every particle_select particles
+  int particle_select = 1; // track one every particle_select particles XXX
+                           // XXX: was 5000
   int particle_tracing_start = 0;  // the time step that particle tracking is triggered
                                    // this should be set to 0 for Pass1 and 2
   int dump_traj_directly = 1;      // dump particle trajectories in 1st pass
@@ -185,19 +203,22 @@ begin_initialization {
   // Numerical parameters
   double ion_sort_interval = 25;        // Injector moments are also updated at this internal
   double electron_sort_interval = 25;   // Injector moments are also updated at this internal
+  // XXX: keep nppc at 100?  we lowered to 50 in our vpic407 deck
   double nppc  =  100;                  // Average number of macro particle per cell per species
 
   double Lx  = 256.0/sqrt(mi_me)*di;   // size of box in x dimension
   double Ly  = 1.0/sqrt(mi_me)*di;      // size of box in y dimension
   double Lz  = 128.0/sqrt(mi_me)*di;    // size of box in z dimension
 
-  double topology_x = 16;  // Number of domains in x, y, and z
-  double topology_y = 1;
-  double topology_z = 2;
+  /* XXX:start */                       /* XXX: was 16,1,2 */
+  double topology_x = VPIC_TOPOLOGY_X;  // Number of domains in x, y, and z
+  double topology_y = VPIC_TOPOLOGY_Y;
+  double topology_z = VPIC_TOPOLOGY_Z;
 
-  double nx = 1024;
-  double ny = 1;
-  double nz = 512;
+  double nx = VPIC_PARTICLE_X;          /* XXX: was 1024,1,512 */
+  double ny = VPIC_PARTICLE_Y;
+  double nz = VPIC_PARTICLE_Z;
+  /* XXX:end */
 
   double hx = Lx/nx;
   double hy = Ly/ny;
@@ -218,6 +239,7 @@ begin_initialization {
   double dbx = -dbz*Lpert/(2.0*Lz);       // Set Bx perturbation so that div(B) = 0
 
   // Determine the time step
+  int rank_int = int(rank());   /* XXX */
   double dg = courant_length(Lx,Ly,Lz,nx,ny,nz); // courant length
   double dt = cfl_req*dg/c;                      // courant limited time step
   if( wpe*dt>wpedt_max) dt=wpedt_max/wpe;        // override timestep if plasma frequency limited
@@ -228,13 +250,13 @@ begin_initialization {
   //int energies_interval = 1;                     // for testing
   int interval = int(1.0/(wpe*dt));
   //int interval = 50;                             // for testing
-  int tracer_interval = 1*interval;
-  int tracer_pass1_interval = 1*interval;
-  int tracer_pass2_interval = 1*interval;
+  int tracer_interval = VPIC_DUMP_INTERVAL; /* XXX: was 1*interval */
+  int tracer_pass1_interval = VPIC_DUMP_INTERVAL; /* XXX: was 1*interval */
+  int tracer_pass2_interval = VPIC_DUMP_INTERVAL; /* XXX: was 1*interval */
   int fields_interval = 5*interval;
   int ehydro_interval = 5*interval;
   int Hhydro_interval = 5*interval;
-  int eparticle_interval = 200000*interval;
+  int eparticle_interval = VPIC_DUMP_INTERVAL; /* XXX: was 200000*interval */
   int Hparticle_interval = 200000*interval;
   int quota_check_interval = 100;
 
@@ -276,7 +298,7 @@ begin_initialization {
   ///////////////////////////////////////////////
   // Setup high level simulation parameters
   sim_log("Setting up high-level simulation parameters. ");
-  num_step             = int(taui/(wci*dt));
+  num_step             = VPIC_TIMESTEPS; /* XXX: was int(taui/(wci*dt)) */
   //num_step             = 100;  // for testing
   status_interval      = 50;
   sync_shared_interval = status_interval/2;
@@ -348,7 +370,7 @@ begin_initialization {
   /////////////////////////////////////////////////////////////////////////////
   // Setup materials
 
-  sim_log("Setting up materials. ");
+  sim_vlog("Setting up materials. ");
 
   define_material( "vacuum", 1 );
 
@@ -360,14 +382,17 @@ begin_initialization {
   /////////////////////////////////////////////////////////////////////////////
   // Finalize Field Advance
 
-  sim_log("Finalizing Field Advance");
+  sim_vlog("Finalizing Field Advance");
 
   define_field_array(NULL);
 
   /////////////////////////////////////////////////////////////////////////////
   // Setup the species
 
-  sim_log("Setting up species. ");
+  sim_vlog("Setting up species. ");
+  sim_log ( "> nproc = " << nproc ()  );
+  sim_log ( "> total # of particles = " << 2*Ne );
+
   double nparticles_per_proc = 5.*Ne/nproc();
   double nmovers_per_proc    = 0.1*nparticles_per_proc;
   int ntracers_per_proc      = nparticles_per_proc/particle_select;
@@ -376,92 +401,100 @@ begin_initialization {
   sim_log( "num_tracer_particles_per_proc = "<<ntracers_per_proc );
 
   double sort_method = 1;   //  0=in place and 1=out of place
-  species_t *electron = define_species("electron",-ec, me, nparticles_per_proc,
+  /*XXX:start*/   /*rename electron to "e" and ion to "i" */
+  species_t *electron = define_species("e",-ec, me, nparticles_per_proc,
           nmovers_per_proc, electron_sort_interval, sort_method);
-  species_t *ion = define_species("ion", ec, mi, nparticles_per_proc,
+  species_t *ion = define_species("i", ec, mi, nparticles_per_proc,
           nmovers_per_proc, ion_sort_interval, sort_method);
+  /*XXX:end*/   /*rename electron to "e" and ion to "i" */
 
   // particle tracer species
   sim_log("Setting up tracer electrons.");
   sort_method = 0;   //  0=in place and 1=out of place
-  species_t *e_tracer = define_species("electron_tracer",-ec, me, ntracers_per_proc,
+  /*XXX:start*/   /*rename electron_tracer and H_tracer to eR and HR */
+  species_t *e_tracer = define_species("eR",-ec, me, ntracers_per_proc,
           nmovers_per_proc, electron_sort_interval, sort_method);
   sim_log("Setting up tracer ions.");
-  species_t *H_tracer = define_species("H_tracer", ec, mi, ntracers_per_proc,
+  species_t *H_tracer = define_species("HR", ec, mi, ntracers_per_proc,
           nmovers_per_proc, ion_sort_interval, sort_method);
+  /*XXX:end*/   /*rename electron_tracer and H_tracer to eR and HR */
 
   hijack_tracers(2);
 
   /////////////////////////////////////////////////////////////////////////////
   // Log diagnostic information about this simulation
 
-  sim_log( "***********************************************" );
+  sim_vlog( "***********************************************" );
   sim_log("* Topology:                       " << topology_x
     << " " << topology_y << " " << topology_z);
-  sim_log ( "L_di   = " << L_di );
-  sim_log ( "Ti/Te = " << Ti_Te ) ;
-  sim_log ( "wpe/wce = " << wpe_wce );
-  sim_log ( "mi/me = " << mi_me );
-  sim_log ( "theta = " << theta );
-  sim_log ( "taui = " << taui );
+  sim_vlog ( "L_di   = " << L_di );
+  sim_vlog ( "Ti/Te = " << Ti_Te ) ;
+  sim_vlog ( "wpe/wce = " << wpe_wce );
+  sim_vlog ( "mi/me = " << mi_me );
+  sim_vlog ( "theta = " << theta );
+  sim_vlog ( "taui = " << taui );
   sim_log ( "num_step = " << num_step );
-  sim_log ( "Lx/di = " << Lx/di );
-  sim_log ( "Lx/de = " << Lx/de );
-  sim_log ( "Ly/di = " << Ly/di );
-  sim_log ( "Ly/de = " << Ly/de );
-  sim_log ( "Lz/di = " << Lz/di );
-  sim_log ( "Lz/de = " << Lz/de );
-  sim_log ( "nx = " << nx );
-  sim_log ( "ny = " << ny );
-  sim_log ( "nz = " << nz );
-  sim_log ( "courant = " << c*dt/dg );
-  sim_log ( "nproc = " << float(nproc())  );
-  sim_log ( "nppc = " << nppc );
-  sim_log ( "b0 = " << b0 );
-  sim_log ( "di = " << di );
-  sim_log ( "Ne = " << Ne );
+  sim_vlog ( "Lx/di = " << Lx/di );
+  sim_vlog ( "Lx/de = " << Lx/de );
+  sim_vlog ( "Ly/di = " << Ly/di );
+  sim_vlog ( "Ly/de = " << Ly/de );
+  sim_vlog ( "Lz/di = " << Lz/di );
+  sim_vlog ( "Lz/de = " << Lz/de );
+#if (defined(VERBOSE_MESSAGES) && (VERBOSE_MESSAGES > 0)) /* XXX:start */
+  sim_vlog ( "nx = " << nx );
+  sim_vlog ( "ny = " << ny );
+  sim_vlog ( "nz = " << nz );
+#else
+  sim_log ( "Particles: nx = " << nx << " ny = " << ny << " nz = " << nz );
+#endif /* XXX:end */
+  sim_vlog ( "courant = " << c*dt/dg );
+  sim_vlog ( "nproc = " << float(nproc())  );
+  sim_vlog ( "nppc = " << nppc );
+  sim_vlog ( "b0 = " << b0 );
+  sim_vlog ( "di = " << di );
+  sim_vlog ( "Ne = " << Ne );
   sim_log ( "total # of particles = " << 2*Ne );
-  sim_log ( "qi = " << qi );
-  sim_log ( "qe = " << qe );
-  sim_log ( "dt*wpe = " << wpe*dt );
-  sim_log ( "dt*wce = " << wce*dt );
-  sim_log ( "dt*wci = " << wci*dt );
-  sim_log ( "energies_interval = " << energies_interval );
-  sim_log ( "dx/de = " << Lx/(de*nx) );
-  sim_log ( "dy/de = " << Ly/(de*ny) );
-  sim_log ( "dz/de = " << Lz/(de*nz) );
-  sim_log ( "dx/rhoe = " << (Lx/nx)/(vthe/wce)  );
-  sim_log ( "L/debye = " << L/(vthe/wpe)  );
-  sim_log ( "dx/debye = " << (Lx/nx)/(vthe/wpe)  );
-  sim_log ( "n0 = " << n0 );
-  sim_log ( "vthi/c = " << vthi/c );
-  sim_log ( "vthe/c = " << vthe/c );
-  sim_log ( "restart_interval = "      << restart_interval );
-  sim_log ( "fields_interval = "       << fields_interval );
-  sim_log ( "ehydro_interval = "       << ehydro_interval );
-  sim_log ( "Hhydro_interval = "       << Hhydro_interval );
-  sim_log ( "eparticle_interval = "    << eparticle_interval );
-  sim_log ( "Hparticle_interval = "    << Hparticle_interval );
-  sim_log ( "quota_check_interval = "  << quota_check_interval );
-  sim_log ( "particle_tracing = "      << particle_tracing );
-  sim_log ( "tracer_interval = "       << tracer_interval );
-  sim_log ( "tracer_pass1_interval = " << tracer_pass1_interval );
-  sim_log ( "tracer_pass2_interval = " << tracer_pass2_interval );
-  sim_log ( "Ntracer = "               << global->Ntracer );
-  sim_log ( "emf_at_tracer = "         << emf_at_tracer );
-  sim_log ( "hydro_at_tracer = "       << hydro_at_tracer );
-  sim_log ( "dump_traj_directly = "    << dump_traj_directly );
-  sim_log ( "num_tracer_fields_add = " << global->num_tracer_fields_add );
-  sim_log ( "emax_band = " << emax_band );
-  sim_log ( "emin_band = " << emin_band );
-  sim_log ( "nbands = " << nbands );
-  sim_log ( "emax_spect = " << emax_spect );
-  sim_log ( "emin_spect = " << emin_spect );
-  sim_log ( "nbins = " << nbins );
-  sim_log ( "nx_zone = " << nx_zone );
-  sim_log ( "ny_zone = " << ny_zone );
-  sim_log ( "nz_zone = " << nz_zone );
-  sim_log ( "stride_particle_dump = " << stride_particle_dump );
+  sim_vlog ( "qi = " << qi );
+  sim_vlog ( "qe = " << qe );
+  sim_vlog ( "dt*wpe = " << wpe*dt );
+  sim_vlog ( "dt*wce = " << wce*dt );
+  sim_vlog ( "dt*wci = " << wci*dt );
+  sim_vlog ( "energies_interval = " << energies_interval );
+  sim_vlog ( "dx/de = " << Lx/(de*nx) );
+  sim_vlog ( "dy/de = " << Ly/(de*ny) );
+  sim_vlog ( "dz/de = " << Lz/(de*nz) );
+  sim_vlog ( "dx/rhoe = " << (Lx/nx)/(vthe/wce)  );
+  sim_vlog ( "L/debye = " << L/(vthe/wpe)  );
+  sim_vlog ( "dx/debye = " << (Lx/nx)/(vthe/wpe)  );
+  sim_vlog ( "n0 = " << n0 );
+  sim_vlog ( "vthi/c = " << vthi/c );
+  sim_vlog ( "vthe/c = " << vthe/c );
+  sim_vlog ( "restart_interval = "      << restart_interval );
+  sim_vlog ( "fields_interval = "       << fields_interval );
+  sim_vlog ( "ehydro_interval = "       << ehydro_interval );
+  sim_vlog ( "Hhydro_interval = "       << Hhydro_interval );
+  sim_vlog ( "eparticle_interval = "    << eparticle_interval );
+  sim_vlog ( "Hparticle_interval = "    << Hparticle_interval );
+  sim_vlog ( "quota_check_interval = "  << quota_check_interval );
+  sim_vlog ( "particle_tracing = "      << particle_tracing );
+  sim_vlog ( "tracer_interval = "       << tracer_interval );
+  sim_vlog ( "tracer_pass1_interval = " << tracer_pass1_interval );
+  sim_vlog ( "tracer_pass2_interval = " << tracer_pass2_interval );
+  sim_vlog ( "Ntracer = "               << global->Ntracer );
+  sim_vlog ( "emf_at_tracer = "         << emf_at_tracer );
+  sim_vlog ( "hydro_at_tracer = "       << hydro_at_tracer );
+  sim_vlog ( "dump_traj_directly = "    << dump_traj_directly );
+  sim_vlog ( "num_tracer_fields_add = " << global->num_tracer_fields_add );
+  sim_vlog ( "emax_band = " << emax_band );
+  sim_vlog ( "emin_band = " << emin_band );
+  sim_vlog ( "nbands = " << nbands );
+  sim_vlog ( "emax_spect = " << emax_spect );
+  sim_vlog ( "emin_spect = " << emin_spect );
+  sim_vlog ( "nbins = " << nbins );
+  sim_vlog ( "nx_zone = " << nx_zone );
+  sim_vlog ( "ny_zone = " << ny_zone );
+  sim_vlog ( "nz_zone = " << nz_zone );
+  sim_vlog ( "stride_particle_dump = " << stride_particle_dump );
 
   /////////////////////////////////////////////////////////////////////////////
   // Dump simulation information to file "info"
@@ -586,7 +619,7 @@ begin_initialization {
 # define DBX dbx*cos(2.0*pi*(x-0.5*Lx)/Lpert)*sin(pi*z/Lz)
 # define DBZ dbz*cos(pi*z/Lz)*sin(2.0*pi*(x-0.5*Lx)/Lpert)
 
-  sim_log( "Loading fields" );
+  sim_vlog( "Loading fields" );
   //set_region_field( everywhere, 0, 0, 0, BX+DBX, BY, DBZ);
   set_region_field( everywhere, 0, 0, 0, (BX+DBX)*cs+BY*sn, -(BX+DBX)*sn+BY*cs, DBZ);
 
@@ -600,7 +633,15 @@ begin_initialization {
   int itracer    = 0;   // tracer index
   int iparticle  = 0;   // particle index
 
-  sim_log( "Loading particles" );
+  sim_vlog( "Loading particles" );
+
+  // XXX:START
+  dump_mkdir("names");     // George: particle names
+  FileIO namefd;
+  char namefile[24];
+  snprintf(namefile, sizeof(namefile), "names/names.%d", (int) rank());
+  namefd.open(namefile, io_write);
+  // XXX:END
 
   // Do a fast load of the particles
 
@@ -609,9 +650,15 @@ begin_initialization {
   double ymin = grid->y0 , ymax = grid->y0+(grid->dy)*(grid->ny);
   double zmin = grid->z0 , zmax = grid->z0+(grid->dz)*(grid->nz);
 
+  // XXX:START
+  int i=0;
+  int64_t itp=0;
+  int64_t tag=0;
+  // XXX:END
+
   // Load Harris population
 
-  sim_log( "-> Force Free Sheet" );
+  sim_vlog( "-> Force Free Sheet" );
 
   repeat ( Ne/nproc() ) {
     double x, y, z, ux, uy, uz, upa1, upe1, uz1, gu1;
@@ -634,8 +681,33 @@ begin_initialization {
     uy = (GVD*upa1*VDY/VD + upe1*VDX/VD) + GVD*VDY*gu1;
     uz = uz1;
 
+    // XXX:START
+    if (particle_tracing == 1) {      /* generate a tag */
+      if (i % particle_select == 0) {
+        itp++;
+        // Tag format: 18 bits for rank (up to 250K nodes) and
+        //             46 bits for particle ID (up to 70T particles/node)
+        tag = (((int64_t) rank_int) << 46) | (itp & 0x3ffffffffff);
+      }
+    }
+    // XXX:END
+
     //L.O. inject_particle(electron, x, y, z, ux, uy, uz, qe, 0, 0 );
-    inject_particle(electron, x, y, z, ux*cs+uy*sn, -ux*sn+uy*cs, uz, weight, 0, 0);
+    inject_particle(electron, x, y, z, ux*cs+uy*sn, -ux*sn+uy*cs, uz, weight, 0, 0, tag);  /* XXX: added tag at end */
+
+    // XXX:START
+#if (VPIC_FILE_PER_PARTICLE == 0)
+    namefd.print("e.%016lx", tag);
+#endif
+    if (particle_tracing == 1) {
+      if (i % particle_select == 0) {
+        tag_tracer( (electron->p + electron->np-1), e_tracer, tag);
+#if (VPIC_FILE_PER_PARTICLE)
+        namefd.print("eR.%016lx", tag);    /* XXX: eR? */
+#endif
+      }
+    }
+    // XXX:END
 
     // Ions are spatially uniform Maxwellian
 
@@ -654,16 +726,36 @@ begin_initialization {
     //uy = upe1;
     //uz = uz1;
 
-    //L.O. inject_particle(ion, x, y, z, ux, uy, uz, qi, 0, 0 );
-    inject_particle(ion, x, y, z, ux*cs+uy*sn, -ux*sn+uy*cs, uz, weight, 0, 0);
+    // XXX:START
+    if (particle_tracing == 1) {
+      if (i % particle_select == 0) {
+        itp++;
+        // Tag format: 18 bits for rank (up to 250K nodes) and
+        //             46 bits for particle ID (up to 70T particles/node)
+        tag = (((int64_t) rank_int) << 46) | (itp & 0x3ffffffffff);
 
-    ++iparticle;
+      }
+    }
+    // XXX:END
+
+    //L.O. inject_particle(ion, x, y, z, ux, uy, uz, qi, 0, 0 );
+    inject_particle(ion, x, y, z, ux*cs+uy*sn, -ux*sn+uy*cs, uz,
+                    weight, 0, 0, tag); /* XXX: add tag */
+
+#if (VPIC_FILE_PER_PARTICLE == 0)
+    namefd.print("i.%016lx", tag);
+#endif
+
+    /* ++iparticle; */ /* XXX: not using it? */
     if (particle_tracing == 1) { // only tag particles in the 1st pass
-      if (iparticle%particle_select == 0) {
-        itracer++;
-        int tag = ((((int)rank())<<19) | (itracer & 0x7ffff)); // 13 bits (8192) for rank and 19 bits (~520k)
-        tag_tracer( (electron->p + electron->np-1), e_tracer, tag );
+      if (i /* XXX: was 'iparticle' */ %particle_select == 0) {
+        /* itracer++; */  /* XXX: used in old code to set tag? */
+        /* XXX tag already set, already called electron tag_tracer */
+        /* tag_tracer( (electron->p + electron->np-1), e_tracer, tag ); */
         tag_tracer( (ion->p      + ion->np-1),      H_tracer, tag );
+#if (VPIC_FILE_PER_PARTICLE)
+        namefd.print("iR.%016lx", tag);  /* XXX: iR? */
+#endif
       }
     }
   }
@@ -775,7 +867,8 @@ begin_initialization {
     delete [] ftracer_H;
   } // if particle_tracing==2
 
-  sim_log( "Finished loading particles" );
+  sim_vlog( "Finished loading particles" );
+  namefd.close();   // XXX
 
   /*--------------------------------------------------------------------------
    * New dump definition
@@ -801,15 +894,15 @@ begin_initialization {
 
   global->fdParams.format = band;
 
-  sim_log ( "Fields output format = band" );
+  sim_vlog ( "Fields output format = band" );
 
   global->hedParams.format = band;
 
-  sim_log ( "Electron species output format = band" );
+  sim_vlog ( "Electron species output format = band" );
 
   global->hHdParams.format = band;
 
-  sim_log ( "Ion species output format = band" );
+  sim_vlog ( "Ion species output format = band" );
 
   /*--------------------------------------------------------------------------
    * Set stride
@@ -861,9 +954,9 @@ begin_initialization {
   // add field parameters to list
   global->outputParams.push_back(&global->fdParams);
 
-  sim_log ( "Fields x-stride " << global->fdParams.stride_x );
-  sim_log ( "Fields y-stride " << global->fdParams.stride_y );
-  sim_log ( "Fields z-stride " << global->fdParams.stride_z );
+  sim_vlog ( "Fields x-stride " << global->fdParams.stride_x );
+  sim_vlog ( "Fields y-stride " << global->fdParams.stride_y );
+  sim_vlog ( "Fields z-stride " << global->fdParams.stride_z );
 
   // relative path to electron species data from global header
   // sprintf(global->hedParams.baseDir, "hydro");
@@ -881,9 +974,9 @@ begin_initialization {
   // add electron species parameters to list
   global->outputParams.push_back(&global->hedParams);
 
-  sim_log ( "Electron species x-stride " << global->hedParams.stride_x );
-  sim_log ( "Electron species y-stride " << global->hedParams.stride_y );
-  sim_log ( "Electron species z-stride " << global->hedParams.stride_z );
+  sim_vlog ( "Electron species x-stride " << global->hedParams.stride_x );
+  sim_vlog ( "Electron species y-stride " << global->hedParams.stride_y );
+  sim_vlog ( "Electron species z-stride " << global->hedParams.stride_z );
 
   // relative path to electron species data from global header
   // sprintf(global->hHdParams.baseDir, "hydro");
@@ -898,9 +991,9 @@ begin_initialization {
   global->hHdParams.stride_y = 1;
   global->hHdParams.stride_z = 1;
 
-  sim_log ( "Ion species x-stride " << global->hHdParams.stride_x );
-  sim_log ( "Ion species y-stride " << global->hHdParams.stride_y );
-  sim_log ( "Ion species z-stride " << global->hHdParams.stride_z );
+  sim_vlog ( "Ion species x-stride " << global->hHdParams.stride_x );
+  sim_vlog ( "Ion species y-stride " << global->hHdParams.stride_y );
+  sim_vlog ( "Ion species z-stride " << global->hHdParams.stride_z );
 
   // add electron species parameters to list
   global->outputParams.push_back(&global->hHdParams);
@@ -958,15 +1051,15 @@ begin_initialization {
   char varlist[512];
   create_field_list(varlist, global->fdParams);
 
-  sim_log ( "Fields variable list: " << varlist );
+  sim_vlog ( "Fields variable list: " << varlist );
 
   create_hydro_list(varlist, global->hedParams);
 
-  sim_log ( "Electron species variable list: " << varlist );
+  sim_vlog ( "Electron species variable list: " << varlist );
 
   create_hydro_list(varlist, global->hHdParams);
 
-  sim_log ( "Ion species variable list: " << varlist );
+  sim_vlog ( "Ion species variable list: " << varlist );
 
 
   /* ---------------------------------------------
@@ -991,7 +1084,7 @@ begin_initialization {
   global->ny_zone    = ny_zone;
   global->nz_zone    = nz_zone;
 
-  sim_log("*** Finished with user-specified initialization ***");
+  sim_vlog("*** Finished with user-specified initialization ***");
 
 
   // Upon completion of the initialization, the following occurs:
@@ -1031,6 +1124,59 @@ begin_initialization {
 
 #define should_dump_post(x) \
   (global->x##_interval>0 && remainder(step(), global->x##_interval) == 1)
+
+//XXX:START
+#ifdef LOG_SYSSTAT
+/* Parse /proc/meminfo
+ * Returned values are in kiB */
+#include <errno.h>
+
+/* Parse the contents of /proc/meminfo (in buf), return value of "*name" */
+static int64_t get_entry(const char *name, const char *buf)
+{
+    const char *hit = strstr(buf, name);
+    if (hit == NULL)
+        return -1;
+
+    errno = 0;
+    int64_t val = strtoll(hit + strlen(name), NULL, 10);
+    if (errno != 0) {
+        perror("Could not convert number");
+        exit(105);
+    }
+
+    return val;
+}
+
+static void parse_meminfo(void)
+{
+    static FILE* fd;
+    static char buf[8192];
+    int64_t memactiv, memtotal;
+
+    fd = fopen("/proc/meminfo", "r");
+    if (fd == NULL) {
+        perror("Could not open /proc/meminfo");
+        exit(102);
+    }
+
+    size_t len = fread(buf, 1, sizeof(buf) - 1, fd);
+    if (len == 0) {
+        perror("Could not read /proc/meminfo");
+        exit(103);
+    }
+
+    buf[len] = 0; // Make sure buf is zero-terminated
+
+    memtotal = get_entry("MemTotal:", buf);
+    memactiv = get_entry("Active:", buf);
+
+    printf("Free Mem: %3.2lf%%\n", 100.0 - (memactiv * 100.0 / memtotal));
+
+    fclose(fd);
+}
+#endif /* LOG_SYSSTAT */
+//XXX:END
 
 begin_diagnostics {
   /*--------------------------------------------------------------------------
@@ -1307,7 +1453,7 @@ begin_diagnostics {
    *------------------------------------------------------------------------*/
 
   //if(should_dump_pre(ehydro)) hydro_dump("electron", global->hedParams);
-  if(should_dump(ehydro)) hydro_dump("electron", global->hedParams);
+  if(should_dump(ehydro)) hydro_dump("e", global->hedParams); //XXX:shorten
   //if(should_dump_post(ehydro)) hydro_dump("electron", global->hedParams);
 
   /*--------------------------------------------------------------------------
@@ -1315,7 +1461,7 @@ begin_diagnostics {
    *------------------------------------------------------------------------*/
 
   //if(should_dump_pre(Hhydro)) hydro_dump("ion", global->hHdParams);
-  if(should_dump(Hhydro)) hydro_dump("ion", global->hHdParams);
+  if(should_dump(Hhydro)) hydro_dump("i", global->hHdParams);//XXX: ion -> i
   //if(should_dump_post(Hhydro)) hydro_dump("ion", global->hHdParams);
 
   /*--------------------------------------------------------------------------
@@ -1332,6 +1478,35 @@ begin_diagnostics {
   //Vadim:
   //#include "dissipation.cxx"
   //#include "Ohms_exp_all_v2.cxx"
+
+  //XXX:START
+#if (VPIC_FILE_PER_PARTICLE)
+  if(global->particle_tracing==1) {
+    if (should_dump(tracer) && step !=0) {
+#ifdef LOG_SYSSTAT
+      if (rank() == 0) parse_meminfo();
+#endif
+      sim_log("Dumping trajectory data: step T." << step);
+#if (defined(VERBOSE_MESSAGES) && (VERBOSE_MESSAGES > 0))
+      /* Collect total number of particles */
+      species_t *Ts = global->tracers_list;
+      int64_t localnp = 0;
+      while( Ts ) {
+        localnp += Ts->np;
+        Ts = Ts->next;
+      }
+      int64_t globalnp = 0;
+      MPI_Reduce(&localnp, &globalnp, 1, MPI_LONG_LONG_INT, MPI_SUM, 0,
+                 MPI_COMM_WORLD);
+      sim_log("Dumping trajectory data: " << globalnp << " particles");
+#endif
+      double dumpstart = uptime();
+      dump_traj_dfs("particle");   /* NOTE dfs version */
+      double dumpelapsed = uptime() - dumpstart;
+      sim_log("Dumping duration "<<dumpelapsed);
+    }
+#endif
+  //XXX:END
 
   /*--------------------------------------------------------------------------
    * Restart dump
@@ -1383,6 +1558,43 @@ begin_diagnostics {
       fp_restart_info.close();
     }
   } // if
+
+  //XXX:START
+#if (VPIC_FILE_PER_PARTICLE == 0)
+  // Dump particle data
+  if (should_dump(eparticle) && step() != 0) {
+    char subdir[36];
+#ifdef LOG_SYSSTAT
+    if (rank() == 0) parse_meminfo();
+#endif
+    sprintf(subdir,"particle/T.%" PRId64, step());
+    dump_mkdir(subdir);
+
+    sim_log("Dumping trajectory data: step T." << step());
+#if (defined(VERBOSE_MESSAGES) && (VERBOSE_MESSAGES > 0))
+    /* Collect total number of particles */
+    species_t *es = find_species_name("e", species_list);
+    species_t *is = find_species_name("i", species_list);
+    int64_t localnp = es->np + is->np;
+    int64_t globalnp = 0;
+    MPI_Reduce(&localnp, &globalnp, 1, MPI_LONG_LONG_INT, MPI_SUM, 0,
+               MPI_COMM_WORLD);
+    sim_log("Dumping trajectory data: " << globalnp << " particles");
+#endif
+    double dumpstart = uptime();
+
+    sprintf(subdir,"particle/T.%" PRId64 "/eparticle",step());
+    dump_particles("e",subdir);
+
+    sprintf(subdir,"particle/T.%" PRId64 "/iparticle",step());
+    dump_particles("i",subdir);
+
+    double dumpelapsed = uptime() - dumpstart;
+
+    sim_log("Dumping duration "<<dumpelapsed);
+  }
+#endif
+  //XXX:END
 
   // Shut down simulation if wall clock time exceeds global->quota_sec.
   // Note that the mp_elapsed() is guaranteed to return the same value for all
