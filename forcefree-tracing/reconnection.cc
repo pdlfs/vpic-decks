@@ -1482,11 +1482,11 @@ begin_diagnostics {
   //XXX:START
 #if (VPIC_FILE_PER_PARTICLE)
   if(global->particle_tracing==1) {
-    if (should_dump(tracer) && step !=0) {
+    if (should_dump(tracer) && step() !=0) {
 #ifdef LOG_SYSSTAT
       if (rank() == 0) parse_meminfo();
 #endif
-      sim_log("Dumping trajectory data: step T." << step);
+      sim_log("Dumping trajectory data: step T." << step());
 #if (defined(VERBOSE_MESSAGES) && (VERBOSE_MESSAGES > 0))
       /* Collect total number of particles */
       species_t *Ts = global->tracers_list;
@@ -1505,6 +1505,7 @@ begin_diagnostics {
       double dumpelapsed = uptime() - dumpstart;
       sim_log("Dumping duration "<<dumpelapsed);
     }
+  }
 #endif
   //XXX:END
 
