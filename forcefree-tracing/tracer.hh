@@ -653,6 +653,7 @@ template <typename T> int is_negative(T val) {
     sprintf(dname, "%s", fbase );                                             \
     if (step() == 0)           /* XXX */                                      \
       dump_mkdir(dname);                                                      \
+    d = opendir(dname);                                                       \
     nvar = 10; /* XXX: was TRACER_NUM_FIELDS_BASE+TRACER_NUM_ADDED_FIELDS */  \
     index = 0;                                                                \
     float pout[nvar];  /* XXX: was a new/malloc, now on stack */              \
@@ -680,7 +681,8 @@ template <typename T> int is_negative(T val) {
           f = f0 + ii;                                                        \
           if (tag != 0) {                                                     \
             /* CALC_TRACER_USER_DEFINED_DATA; */ /* XXX */                    \
-            sprintf(fname, "%s/%s.%" PRId64, dname , s->name, tag); /* XXX */ \
+            sprintf(fname, "%s/%s.%016" PRIx64, dname ,                       \
+                    s->name, tag); /* XXX */                                  \
             status = fh.open(fname,io_append);                                \
             if ( status == fail ) ERROR(("Could not open file %s", fname));   \
             pout[index + 0] = step()*grid->dt ;                               \
