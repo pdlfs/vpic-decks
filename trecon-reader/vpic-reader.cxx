@@ -15,17 +15,18 @@
 using namespace std;
 
 //#define DEBUG_READER
-#define SPECIES_NUM 4
+#define SPECIES_NUM 2
 enum {
-    SPECIES_EB = 0,
-    SPECIES_ET,
-    SPECIES_IB,
-    SPECIES_IT,
+    SPECIES_E = 0,
+    SPECIES_I,
 };
+#define SPECIES_LEN 1   /* its 1 char, either "e" or "i" */
+#define NAMESZ 18  /* X.0000000000000000 - where "X" is "e" or "i" */
+#define NAMEHEXOFF 2  /* skip "X." to get the hex number */
 
-/* One map for each: eB, eT, iB, iT */
-map<int64_t,int64_t> ids[4];
-map<int64_t,int64_t> rids[4];
+/* One map for each: e, i */
+map<int64_t,int64_t> ids[SPECIES_NUM];
+map<int64_t,int64_t> rids[SPECIES_NUM];
 list<int> epochs;
 int64_t nproc = 0;
 int64_t rank_num = 0;
@@ -58,6 +59,8 @@ void usage(int ret)
  * - float ux, uy, uz; // Particle normalized momentum
  * - float q;          // Particle charge
  * - int64_t tag, tag2; // particle identification tags
+ *
+ * XXX: on disk doesn't quite match this?
  *
  * On Emulab, the VPIC output file preamble is 115B.
  * The particle output per frame is 48B.
@@ -105,11 +108,11 @@ again:
 
     /* Open name file and process it */
     while (cur <= num) {
-        char data[19];
+        char data[NAMESZ];
         int type;
         int64_t tag;
 
-        if (fread(data, sizeof(char), 19, nf) != 19) {
+        if (fread(data, sizeof(char), NAMESZ, nf) != NAMESZ) {
             if (feof(nf)) {
                 fclose(nf);
                 core++;
@@ -120,20 +123,16 @@ again:
             goto err;
         }
 
-        if (!strncmp(data, "eB", 2)) {
-            type = SPECIES_EB;
-        } else if (!strncmp(data, "eT", 2)) {
-            type = SPECIES_ET;
-        } else if (!strncmp(data, "iB", 2)) {
-            type = SPECIES_IB;
-        } else if (!strncmp(data, "iT", 2)) {
-            type = SPECIES_IT;
+        if (!strncmp(data, "e", 1)) {
+            type = SPECIES_E;
+        } else if (!strncmp(data, "i", 1)) {
+            type = SPECIES_I;
         } else {
             fprintf(stderr, "Error: unrecognized particle type for %s\n", data);
             goto err;
         }
 
-        sscanf(data+3, "%016lx", &tag);
+        sscanf(data+NAMEHEXOFF, "%016lx", &tag);
 
         ids[type][cur] = tag;
         rids[type][tag] = cur;
@@ -186,7 +185,8 @@ int process_epoch(char *ppath, char *outdir, int64_t num, int it)
         if (dp->d_type != DT_REG)
             continue;
 
-        if (strncmp(dp->d_name+2, fprefix, strnlen(fprefix, PATH_MAX))) {
+        if (strncmp(dp->d_name+SPECIES_LEN, fprefix,
+                    strnlen(fprefix, PATH_MAX))) {
             fprintf(stderr, "Warning: unexpected file %s in %s\n",
                     dp->d_name, epath);
             continue;
@@ -201,14 +201,10 @@ int process_epoch(char *ppath, char *outdir, int64_t num, int it)
         }
 
         /* Figure out particle type (species) */
-        if (!strncmp(dp->d_name, "eB", 2)) {
-            type = SPECIES_EB;
-        } else if (!strncmp(dp->d_name, "eT", 2)) {
-            type = SPECIES_ET;
-        } else if (!strncmp(dp->d_name, "iB", 2)) {
-            type = SPECIES_IB;
-        } else if (!strncmp(dp->d_name, "iT", 2)) {
-            type = SPECIES_IT;
+        if (!strncmp(dp->d_name, "e", 1)) {
+            type = SPECIES_E;
+        } else if (!strncmp(dp->d_name, "i", 1)) {
+            type = SPECIES_I;
         } else {
             fprintf(stderr, "Error: unrecognized particle type in file %s\n", dp->d_name);
             goto err;
