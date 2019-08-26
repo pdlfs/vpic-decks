@@ -23,6 +23,12 @@
 cmake_minimum_required (VERSION 3.0)
 project (vpic-decks C CXX)
 
+find_package (MPI MODULE REQUIRED)
+string (REPLACE " " ";" MPI_CXX_COMPILE_FLAGS_LIST "${MPI_CXX_COMPILE_FLAGS}")
+# link shared lib with full rpath
+set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 # decks to install
 set (install-decks forcefree-tracing)
 
@@ -30,3 +36,8 @@ set (install-decks forcefree-tracing)
 # "make install" rules
 #
 install (DIRECTORY ${install-decks} DESTINATION decks)
+
+#
+# other stuff
+#
+add_subdirectory (trecon-reader)
